@@ -1,22 +1,22 @@
 
 #include <Arduino.h>
 
-// #define ENC_A 3
-// #define ENC_B 2
+#define ENC_A 3
+#define ENC_B 2
 unsigned long _lastIncReadTime = micros();
 unsigned long _lastDecReadTime = micros();
 constexpr int _pauseLength = 25000;
 constexpr int _fastIncrement = 10;
 unsigned long counter;
-
-
-void setup_encoders(){
-      // pinMode(ENC_A, INPUT_PULLUP);
-    // pinMode(ENC_B, INPUT_PULLUP);
-    // attachInterrupt(digitalPinToInterrupt(ENC_A), read_encoder, CHANGE);
-    // attachInterrupt(digitalPinToInterrupt(ENC_B), read_encoder, CHANGE);
-    // analogReference(EXTERNAL);
-    //  analogRead(0);
+void read_encoder();
+void setup_encoders()
+{
+    pinMode(ENC_A, INPUT_PULLUP);
+    pinMode(ENC_B, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(ENC_A), read_encoder, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(ENC_B), read_encoder, CHANGE);
+    analogReference(EXTERNAL);
+    analogRead(0);
 }
 
 void read_encoder()
@@ -30,10 +30,10 @@ void read_encoder()
 
     old_AB <<= 2; // Remember previous state
 
-    //   if (digitalRead(ENC_A))
-    old_AB |= 0x02; // Add current state of pin A
-                    //   if (digitalRead(ENC_B))
-    old_AB |= 0x01; // Add current state of pin B
+    if (digitalRead(ENC_A))
+        old_AB |= 0x02; // Add current state of pin A
+    if (digitalRead(ENC_B))
+        old_AB |= 0x01; // Add current state of pin B
 
     encval += enc_states[(old_AB & 0x0f)];
 

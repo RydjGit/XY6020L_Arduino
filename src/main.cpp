@@ -1,26 +1,58 @@
 #include <Arduino.h>
 #include <Adafruit_MCP4725.h>
 #include <Adafruit_ADS1X15.h>
-#include <LibPrintf.h>
+ //#include <LibPrintf.h> this interfere with ssd1306 adafruit lib!!!!!
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <Wire.h>
 // #include <RotaryEncoder.h>
 ////I2C device found at address 0x48  ! ads1115
 ////I2C device found at address 0x61  ! current DAC
 ////I2C device found at address 0x60    voltage DAC
-#define DAC_VCC 3300.0 // 4.88 VOLTS
-#define R1_VIN 100000.0
+#define DAC_VCC 3327.0 // 4.88 VOLTS
+#define R1_VIN 99369.55
 #define R2_VIN 5100.0
 void Read_serial(void);
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+
+// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
+// The pins for I2C are defined by the Wire-library.
+// On an arduino UNO:       A4(SDA), A5(SCL)
+// On an arduino MEGA 2560: 20(SDA), 21(SCL)
+// On an arduino LEONARDO:   2(SDA),  3(SCL), ...
+#define OLED_RESET -1       // Reset pin # (or -1 if sharing Arduino reset pin)
+#define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
+Adafruit_SSD1306 oled(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Adafruit_MCP4725 DAC_V;
 Adafruit_MCP4725 DAC_A;
 Adafruit_ADS1115 ADS;
 uint16_t V_set = 0;
 uint16_t A_set = 0;
+uint16_t Adc_Counter = 0;
+bool calibrate = false;
 void setup()
 {
+    // Wire.begin();
+    // Wire.setClock(400000UL);
     Serial.begin(115200);
-    printf("staring...\n");
-    Wire.begin();
-    Wire.setClock(400000UL);
+    if (!oled.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS))
+    {
+        Serial.println(F("SSD1306 allocation failed"));
+        for (;;)
+            ; // Don't proceed, loop forever
+    }
+    oled.display();
+    delay(2000); // Pause for 2 seconds
+
+    oled.clearDisplay();
+    oled.setTextSize(1); // Draw 2X-scale text
+    oled.setTextColor(SSD1306_WHITE);
+    oled.setCursor(0, 0);
+    oled.print(F("starting......"));
+    oled.display();
+    Serial.println(F("staring..."));
+
     DAC_A.begin(0x61);
     DAC_V.begin(0x60);
     if (!ADS.begin())
@@ -49,11 +81,10 @@ void loop()
 
         if (command == 'v') // If command is 'V', read voltage
         {
-            V_set = Serial.parseFloat();                                 // Read the voltage value
-            double dac_value = ((158 + (V_set * 0.0494)) * 1.051) - 3; // 153 is at 5 volts but measured is 163mv
+            V_set = Serial.parseFloat();                               // Read the voltage value
+            double dac_value = ((160 + (V_set * 0.0494)) * 1.051) - 3; // 153 is at 5 volts but measured is 163mv
             DAC_V_steps = (4095.0 / DAC_VCC) * dac_value;
-            DAC_V_steps = DAC_V_steps;
-            printf(" voltage = %d  calculated V_VDAC voltage= %f   dac STEPS= %d\n", V_set, dac_value, DAC_V_steps);
+            //  printf(" voltage = %d  calculated V_VDAC voltage= %f   dac STEPS= %d\n", V_set, dac_value, DAC_V_steps);
 
             DAC_V.setVoltage(DAC_V_steps, false); // correct DAC steps error by adding 20 this is done using trial and error
         }
@@ -77,21 +108,37 @@ void loop()
     }
     if (ADS.conversionComplete())
     {
-        uint16_t adc = 0;
+        int16_t adc;
         adc = ADS.getLastConversionResults();
-        adc_volts = ADS.computeVolts(adc);
-        vout_sense = adc_volts * (R1_VIN + R2_VIN) / R2_VIN;
-        ADS.startADCReading(ADS1X15_REG_CONFIG_MUX_SINGLE_0, false); // non_blocking continous reading adc voltage
+        adc_volts += ADS.computeVolts(adc);
+        ADS.startADCReading(ADS1X15_REG_CONFIG_MUX_SINGLE_0, false);
+        Adc_Counter++;
+        if (Adc_Counter == 99)
+        {
+            Adc_Counter = 0;
+            calibrate = true;
+            vout_sense = (adc_volts / 100) * ((R1_VIN + R2_VIN) / R2_VIN);
+            adc_volts = 0;
+            oled.clearDisplay();
+            oled.setCursor(0, 0); // Avoid overlapping text
+            oled.setTextSize(2);  // Draw 2X-scale text
+
+            oled.println(F("Voltage: "));
+            oled.setTextSize(2); // Draw 2X-scale text
+
+            oled.println(vout_sense, 5);
+            oled.display(); // Add this to refresh the display
+        }
+        // non_blocking continous reading adc voltage
     }
-    if (millis() - time > 100 && V_set != 0)
+    if (calibrate && V_set != 0)
     {
-        uint16_t current_step = DAC_V_steps;
-        time = millis();
-        int vout_mv = (vout_sense * 1000);
-        int diff = (vout_mv - V_set);
+        calibrate = false;
+        int mv = (vout_sense * 1000);
+        int diff = (mv - V_set);
         // printf("vout_mv=%d   diff=%d\n", vout_mv, diff);
 
-        if (abs(diff) > 10)
+        if (abs(diff) > 2)
         {
             //  printf("vout sense is not calbirated vout=%d diff=%d\n", vout_mv, diff);
             if (diff > 0)
@@ -101,8 +148,7 @@ void loop()
 
             DAC_V_steps = DAC_V_steps > 4095 ? 4095 : DAC_V_steps;
             DAC_V_steps = DAC_V_steps < 0 ? 0 : DAC_V_steps;
-            if (current_step != DAC_V_steps)
-                DAC_V.setVoltage(DAC_V_steps, false);
+            DAC_V.setVoltage(DAC_V_steps, false);
         }
     }
 }
