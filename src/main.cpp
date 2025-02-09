@@ -1,97 +1,163 @@
 #include <Arduino.h>
-#include <Libprintf.h>
-#include <U8x8lib.h>
-#include <U8g2lib.h>
+#include <Wire.h>
 #include "PSU.h"
-// #include <RotaryEncoder.h>
-#define SCREEN_WIDTH 128 // OLED display width, in pixels
-#define SCREEN_HEIGHT 64 // OLED display height, in pixels
-
-// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
-// The pins for I2C are defined by the Wire-library.
-// On an arduino UNO:       A4(SDA), A5(SCL)
-// On an arduino MEGA 2560: 20(SDA), 21(SCL)
-// On an arduino LEONARDO:   2(SDA),  3(SCL), ...
-#define OLED_RESET -1       // Reset pin # (or -1 if sharing Arduino reset pin)
-#define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
-U8X8_SSD1306_128X64_NONAME_HW_I2C oled(U8X8_PIN_NONE);
+#include <Arduino.h>
+#include <PinChangeInterrupt.h>
+#include <HT1621B.h>
+/***************************************************** */
+#define BTN_SW 12
+#define CS 11      // Chip Select
+#define WR 10      // Write Clock
+#define DATA_pin 9 // Data Line
+#define Fan_pin 8
+#define BTN_VA 7
+#define LCD_BACKLIGHT 6
+#define BTN_ROTAT 5
+#define BTN_POWER 4
+#define enc_B 3
+#define enc_A 2
+/********************************************************* */
+volatile bool OUTPU_ENABLED = true;
+/********************************************************* */
+float Voltage = 5.00;
+float Current = 1.00;
+volatile bool Editing = false;
+/********************************************************* */
+HT1621B LCD(CS, WR, DATA_pin);
 PSU psu;
+/********************************************************* */
+void SW_Pressed();
+void VA_Pressed();
+void ROTAT_pressed();
+void POWER_Pressed();
+void setupTimer();
+/********************************************************* */
 
-void Read_display_volts();
-void read_display_current();
 void setup()
 {
-    // Wire.begin();
-    // Wire.setClock(400000UL);
     Serial.begin(115200);
-    Serial.println(F("staring..."));
-    printf("Hello form printf()\n");
-    pinMode(9, OUTPUT);
-    oled.begin();
-    oled.setFont(u8x8_font_pxplustandynewtv_n); // Choose a font
+
+    pinMode(CS, OUTPUT);
+    pinMode(WR, OUTPUT);
+    pinMode(DATA_pin, OUTPUT);
+    pinMode(LCD_BACKLIGHT, OUTPUT);
+
+    pinMode(BTN_ROTAT, INPUT_PULLUP);
+    pinMode(BTN_POWER, INPUT_PULLUP);
+    pinMode(BTN_SW, INPUT_PULLUP);
+    pinMode(BTN_VA, INPUT_PULLUP);
+    // IMPORATNAT: after pin initialisation CS WR DATA
+    LCD.begin();
+
+    attachPCINT(digitalPinToPCINT(BTN_POWER), POWER_Pressed, FALLING);
+    attachPCINT(digitalPinToPCINT(BTN_ROTAT), ROTAT_pressed, FALLING);
+    attachPCINT(digitalPinToPCINT(BTN_VA), VA_Pressed, FALLING);
+    attachPCINT(digitalPinToPCINT(BTN_SW), SW_Pressed, FALLING);
+
+    LCD.setupEncoder(enc_A, enc_B);
+
+    digitalWrite(LCD_BACKLIGHT, HIGH);
+
+    Serial.println("XY6020L Firmware by Dr.Ra'ed Jaradat ......   :)");
     psu.begin();
+    Serial.println("XY6020L Firmware by Dr.Ra'ed Jaradat ......   :)");
 }
 
 /***************************************************** */
-
+unsigned long updatetimer = millis();
 void loop()
 {
-    ////********ENTER Values In mV and in mAmps***********///
-    while (Serial.available() > 0)
-    {
-        char command = Serial.read(); // Read the command character ('V' or 'A')
+    psu.enable_output(OUTPU_ENABLED);
 
-        if (command == 'v') // If command is 'V', read voltage
+    if (millis() - updatetimer > 200)
+    {
+        float V = psu.readVout();
+        float A = psu.readCurrent();
+        LCD.print_voltage(psu.readVout());
+        LCD.print_current(psu.readCurrent());
+        if (!LCD.Get_editingStatus())
         {
-            float V_set = Serial.parseFloat(); // Read the voltage value
-            psu.setvoltage(V_set);
+            LCD.print_power(V * A);
         }
-        else if (command == 'a') // If command is 'A', read current
-        {
-            float A_set = Serial.parseFloat();
-            psu.setCurrent(A_set);
-        }
-        else if (command == 'd') // If command is 's', print sensed voltage
-        {
-            psu.debug();
-        }
-        else if (command == 'f')
-        {
-            digitalWrite(9, !digitalRead(9));
-        }
-        else
-        {
-            printf("Invalid command. Use 'V' for voltage or 'A' for amps.\n");
-        }
+        updatetimer = millis();
     }
-    psu.work();
-    psu.calibrate();
-    Read_display_volts();
-    read_display_current();
-    psu.debug();
+
+    if (Editing && OUTPU_ENABLED)
+    {
+        psu.setvoltage(Voltage);
+        psu.setCurrent(Current);
+    }
+
+    LCD.Update();
+    LCD.blink();
 }
 
-/***********************************************************************************s */
-void Read_display_volts(void)
+/*********************************************************************************** */
+static volatile long debounce = millis();
+#define BEDOUNCE_DURATION 250
+
+void SW_Pressed()
 {
-    oled.setCursor(0, 0);
-    float vout = psu.readVout();
-    if (vout != -1)
+    if ((millis() - debounce) < BEDOUNCE_DURATION)
     {
-        oled.println(vout, 6);
+        return;
     }
 
-    // oled.print(vout);
-    // oled.println(DAC_V_steps);
+    debounce = millis();
 }
-void read_display_current()
+void VA_Pressed()
 {
-    oled.setCursor(0, 5);
-    float current = psu.readCurrent();
-    if (current != -1)
+    if ((millis() - debounce) < BEDOUNCE_DURATION)
     {
-        oled.println(current, 6);
+        return;
     }
+    debounce = millis();
+    static volatile int mode = 0; // 0: Editing Off, 1: Voltage, 2: Amperage
+    mode = (mode + 1) % 3;        // Cycle through 0 → 1 → 2 → 0
+    switch (mode)
+    {
+    case 0:
+        LCD.TggoleEditingMode(HT1621B::EditingMode::NONE, nullptr);
+        Editing = false;
+        break;
 
-    //  oled.println(mv / samples, 6);
+    case 1:
+        LCD.TggoleEditingMode(HT1621B::EditingMode::Voltage, &Voltage);
+        Editing = true;
+        break;
+
+    case 2:
+        LCD.TggoleEditingMode(HT1621B::EditingMode::Amperage, &Current);
+        Editing = true;
+        break;
+    default:
+        break;
+    }
+}
+
+void ROTAT_pressed()
+{
+    if ((millis() - debounce) < BEDOUNCE_DURATION)
+    {
+        return;
+    }
+    debounce = millis();
+
+    if (LCD.Get_editingStatus())
+    {
+        LCD.Advance_Blink_Position();
+    }
+}
+
+void POWER_Pressed()
+{
+    if ((millis() - debounce) < BEDOUNCE_DURATION)
+    {
+        return;
+    }
+    debounce = millis();
+    static bool on_off = true;
+    on_off = !on_off;
+    LCD.output_on_off(on_off);
+    OUTPU_ENABLED = !OUTPU_ENABLED;
 }
