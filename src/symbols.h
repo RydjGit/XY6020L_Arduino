@@ -75,3 +75,4 @@ struct CV_SET_OFF_ON
 
     CV_SET_OFF_ON() : address(26), data(0b1000) {}
 };
+

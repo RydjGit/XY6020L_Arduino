@@ -56,8 +56,8 @@ private:
 
 public:
     void print_voltage(float v);
-    void print_current(float current);
-    void print_power(float power, bool is_tempreture = false);
+    void print_current(float current, bool is_temp);
+    void print_power(float power);
     void begin();
     void setupEncoder(uint8_t EncA, uint8_t EncB);
     // void Set_EncoderData(float *_cnt);
@@ -68,7 +68,8 @@ public:
     void TggoleEditingMode(EditingMode mode, float *blinking_val);
     bool Get_editingStatus();
     void Update();
-
+    void Calibrating_symbole( );
+    void Detect_CC();
 public:
     HT1621B(uint8_t _cs, uint8_t _wr, uint8_t _data);
     HT1621B() = delete;

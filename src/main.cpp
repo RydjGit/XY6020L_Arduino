@@ -5,6 +5,7 @@
 #include <PinChangeInterrupt.h>
 #include <HT1621B.h>
 /***************************************************** */
+#define PIN_CC A7
 #define BTN_SW 12
 #define CS 11      // Chip Select
 #define WR 10      // Write Clock
@@ -18,6 +19,8 @@
 #define enc_A 2
 /********************************************************* */
 volatile bool OUTPU_ENABLED = true;
+volatile bool CALIBRATE = false;
+volatile bool showTemperature = false;
 /********************************************************* */
 float Voltage = 5.00;
 float Current = 1.00;
@@ -31,11 +34,15 @@ void VA_Pressed();
 void ROTAT_pressed();
 void POWER_Pressed();
 void setupTimer();
+void setupTimer1Interrupt();
+/********************************************************* */
+extern void Measure_temp(Adafruit_ADS1115 &ads);
 /********************************************************* */
 
 void setup()
 {
     Serial.begin(115200);
+    pinMode(PIN_CC, INPUT);
 
     pinMode(CS, OUTPUT);
     pinMode(WR, OUTPUT);
@@ -46,6 +53,9 @@ void setup()
     pinMode(BTN_POWER, INPUT_PULLUP);
     pinMode(BTN_SW, INPUT_PULLUP);
     pinMode(BTN_VA, INPUT_PULLUP);
+
+    pinMode(Fan_pin, OUTPUT);
+    digitalWrite(Fan_pin, LOW);
     // IMPORATNAT: after pin initialisation CS WR DATA
     LCD.begin();
 
@@ -58,6 +68,7 @@ void setup()
 
     digitalWrite(LCD_BACKLIGHT, HIGH);
 
+    setupTimer1Interrupt();
     Serial.println("XY6020L Firmware by Dr.Ra'ed Jaradat ......   :)");
     psu.begin();
     Serial.println("XY6020L Firmware by Dr.Ra'ed Jaradat ......   :)");
@@ -65,24 +76,27 @@ void setup()
 
 /***************************************************** */
 unsigned long updatetimer = millis();
+float temp;
 void loop()
 {
-    psu.enable_output(OUTPU_ENABLED);
 
-    if (millis() - updatetimer > 200)
+    if (millis() - updatetimer > 100)
     {
         float V = psu.readVout();
         float A = psu.readCurrent();
-        LCD.print_voltage(psu.readVout());
-        LCD.print_current(psu.readCurrent());
+        LCD.print_voltage(V);
+        LCD.print_current(A, showTemperature && !LCD.Get_editingStatus());
         if (!LCD.Get_editingStatus())
         {
-            LCD.print_power(V * A);
+            if (!showTemperature)
+            {
+                LCD.print_power(V * A);
+            }
         }
         updatetimer = millis();
     }
 
-    if (Editing && OUTPU_ENABLED)
+    if (Editing && OUTPU_ENABLED && !CALIBRATE)
     {
         psu.setvoltage(Voltage);
         psu.setCurrent(Current);
@@ -90,11 +104,26 @@ void loop()
 
     LCD.Update();
     LCD.blink();
+    if (CALIBRATE)
+    {
+        psu.calibrate();
+    }
+    else
+    {
+        psu.enable_output(OUTPU_ENABLED);
+    }
+    LCD.Detect_CC();
+    if (showTemperature && !LCD.Get_editingStatus())
+    {
+        temp = psu.MeasureTemp();
+        LCD.display_tempreture(temp);
+    }
+    digitalWrite(Fan_pin, temp > 30 ? HIGH : LOW);
 }
 
 /*********************************************************************************** */
 static volatile long debounce = millis();
-#define BEDOUNCE_DURATION 250
+#define BEDOUNCE_DURATION 150
 
 void SW_Pressed()
 {
@@ -102,8 +131,9 @@ void SW_Pressed()
     {
         return;
     }
-
     debounce = millis();
+    LCD.Calibrating_symbole();
+    CALIBRATE = !CALIBRATE;
 }
 void VA_Pressed()
 {
@@ -160,4 +190,39 @@ void POWER_Pressed()
     on_off = !on_off;
     LCD.output_on_off(on_off);
     OUTPU_ENABLED = !OUTPU_ENABLED;
+}
+void setupTimer1Interrupt()
+{
+    cli(); // Disable global interrupts
+
+    TCCR1A = 0;                          // Normal mode
+    TCCR1B = 0;                          // Clear registers
+    TCCR1B |= (1 << WGM12);              // CTC mode (Clear Timer on Compare Match)
+    TCCR1B |= (1 << CS12) | (1 << CS10); // Prescaler 1024
+    OCR1A = 31248;                       // (16MHz / 1024) = 15625 ticks per second (2 sec → 31248, but ~1sec timing here)
+    TIMSK1 |= (1 << OCIE1A);             // Enable Timer1 compare interrupt
+
+    sei(); // Enable global interrupts
+}
+
+// Interrupt Service Routine (ISR) for Timer1
+static unsigned int displayCounter = 0; // Increment counter every second
+
+ISR(TIMER1_COMPA_vect)
+{
+    displayCounter++;
+
+    if (displayCounter >= 7)
+    { // Reset every 5 seconds
+        displayCounter = 0;
+    }
+
+    if (displayCounter < 2)
+    { // Show temperature for first 2 seconds
+        showTemperature = true;
+    }
+    else
+    { // Show power for remaining 3 seconds
+        showTemperature = false;
+    }
 }

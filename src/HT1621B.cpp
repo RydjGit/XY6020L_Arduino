@@ -21,7 +21,7 @@ void HT1621B::ReadEncoder()
 {
     if (_Blinking_Value == nullptr)
         return;
-    
+
     static uint8_t old_AB = 3;                                                               // Lookup table index
     static int8_t encval = 0;                                                                // Encoder value
     static const int8_t enc_states[] = {0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0}; // Lookup table
@@ -92,7 +92,7 @@ void HT1621B::print_voltage(float v)
     }
 }
 
-void HT1621B::print_current(float current)
+void HT1621B::print_current(float current, bool is_temp)
 {
     _amperage_reading = current;
     uint16_t K = current * 100;
@@ -104,21 +104,29 @@ void HT1621B::print_current(float current)
         {
             AmerageDigits[i].data |= 0x01;
         }
+        if (i == 0 && is_temp)
+        {
+            AmerageDigits[i].data |= 0x01; // celsius symbol
+        }
 
         K /= 10;
         link.SendByte(AmerageDigits[i].address, AmerageDigits[i].data);
     }
 }
 
-void HT1621B::print_power(float power, bool is_tempreture)
+void HT1621B::print_power(float power)
 {
-    _power_reading = power;
-    uint16_t K = power * 100;
 
+    uint16_t K = power >= 100 ? power * 10.0 : power * 100;
+    bool larg = power >= 100 ? true : false;
     for (int i = 0; i < 4; i++)
     {
         PowerDigits[i].data = seven_segment[K % 10];
-        if (i == 2)
+        if (i == 2 && !larg)
+        {
+            PowerDigits[i].data |= 0x01;
+        }
+        if (larg && i == 1)
         {
             PowerDigits[i].data |= 0x01;
         }
@@ -141,6 +149,14 @@ void HT1621B::output_on_off(bool on_off)
 {
     sym_on_off_SCV_SET.ON = on_off;
     sym_on_off_SCV_SET.OFF = !sym_on_off_SCV_SET.ON;
+}
+
+void HT1621B::display_tempreture(float temp)
+{
+    if (temp == -200)
+        return;
+
+    print_power(temp);
 }
 
 void HT1621B::Advance_Blink_Position()
@@ -232,4 +248,26 @@ void HT1621B::Update()
     link.SendNibble(sym_on_off_SCV_SET.address, sym_on_off_SCV_SET.data);
     link.SendNibble(sym_vol_curr.address, sym_vol_curr.data);
     link.SendNibble(sym_wifi.address, sym_wifi.data);
+}
+
+void HT1621B::Calibrating_symbole()
+{
+
+    sym_wifi.SOUND = !sym_wifi.SOUND;
+}
+
+void HT1621B::Detect_CC()
+{
+    int data = analogRead(A7);
+
+    if (data > 511)
+    {
+        sym_vol_curr.CC = 1;
+        sym_vol_curr.CV = 0;
+    }
+    else
+    {
+        sym_vol_curr.CC = 0;
+        sym_vol_curr.CV = 1;
+    }
 }
