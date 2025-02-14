@@ -24,6 +24,7 @@ volatile bool showTemperature = false;
 /********************************************************* */
 float Voltage = 5.00;
 float Current = 1.00;
+float VoltgaeDiff = 0.015;
 volatile bool Editing = false;
 /********************************************************* */
 HT1621B LCD(CS, WR, DATA_pin);
@@ -80,7 +81,7 @@ float temp;
 void loop()
 {
 
-    if (millis() - updatetimer > 100)
+    if (millis() - updatetimer > 200)
     {
         float V = psu.readVout();
         float A = psu.readCurrent();
@@ -159,7 +160,7 @@ void VA_Pressed()
     case 2:
         LCD.TggoleEditingMode(HT1621B::EditingMode::Amperage, &Current);
         Editing = true;
-        break;
+        break;    
     default:
         break;
     }

@@ -21,7 +21,7 @@ class PSU
 {
 private:
     float _currentGain = 28.0f;
-    float _current_shuntResistor = 3.33f;
+    float _current_shuntResistor = 3.5f;
     Adafruit_MCP4725 _DAC_V;
     Adafruit_MCP4725 _DAC_A;
     Adafruit_ADS1115 _ADS;
@@ -55,9 +55,7 @@ public:
     float MeasureTemp();
     float VOUT = 0;
 
-private:
-    float voltage_read();
-    float current_read();
+    
 };
 
 #endif

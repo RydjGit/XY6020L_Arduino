@@ -23,7 +23,8 @@ public:
     {
         NONE,
         Voltage,
-        Amperage
+        Amperage,
+        VoltageDiff
     };
     // Define a struct to hold the extracted digits and decimal point location
 

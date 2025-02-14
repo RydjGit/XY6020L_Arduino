@@ -42,12 +42,14 @@ void PSU::begin()
 
 void PSU::setCurrent(float current)
 {
-    //current++;
+    current += 0.5;
     _A_set = current;
     // expected Vdrop of shunt + offset fed noninverting of opamp
-    float expected_shunt_vdrop = ((current * 1000.0 * _current_shuntResistor) / 1000.0) + CURRENT_SET_OFFSET;
+    float expected_shunt_vdrop = ((current * _current_shuntResistor)) + CURRENT_SET_OFFSET;
     // DAV volatge is divded to match expected vdrop of shunt so this is to find vin of DAC
     float dac_divided_voltage = expected_shunt_vdrop * CURRENT_SET_DIVIDER;
+
+    // dac_divided_voltage+=39;
 
     uint16_t steps = dac_divided_voltage * DAC_V_TO_STEPS_RATIO;
     _DAC_A.setVoltage(steps, false);
@@ -71,7 +73,7 @@ void PSU::setvoltage(float voltage)
     // {
     //     expected_divided_voltage += 3;
     // }
-   // expected_divided_voltage += 5; // GND opamp of xy6020L is 5 mv above arduino ground so it sees less voltage from dac
+    expected_divided_voltage += 35; // GND opamp of xy6020L is 5 mv above arduino ground so it sees less voltage from dac
     Serial.print("   dac voltage = ");
     Serial.print(expected_divided_voltage, 6);
     uint16_t steps = expected_divided_voltage * DAC_V_TO_STEPS_RATIO;
@@ -85,13 +87,50 @@ void PSU::setvoltage(float voltage)
 float PSU::readVout()
 {
 
-    return voltage_read();
+    //_ADS.setGain(GAIN_ONE);
+
+    float voltage = 0;
+    long steps = 0;
+    size_t count = 10;
+    for (size_t i = 0; i < count; i++)
+    {
+        steps += _ADS.readADC_SingleEnded(0);
+    }
+    voltage = _ADS.computeVolts(steps / count);
+    voltage -= 0.0014;
+    Serial.print("Voltage adc sence: ");
+    Serial.println(voltage, 4);
+    // voltage = roundf(voltage * 1000) / 1000.0;
+    float Vout = voltage * ((R1_VOUT_SENSE + R2_VOUT_SENSE) / R2_VOUT_SENSE);
+    _voltage_sensed = roundf(Vout * 100) / 100.0;
+    _voltage_sensed = _voltage_sensed < 0 ? 0.00 : _voltage_sensed;
+    VOUT = _voltage_sensed;
+    return _voltage_sensed; // since Dc ground is 20 mv above arduino ground , arduino always reads arround 20mv lower that true voltage
 }
 
 float PSU::readCurrent()
 {
 
-    return current_read();
+    long steps = 0;
+    float vsense = 0;
+    size_t count = 20;
+
+    for (size_t i = 0; i < count; i++)
+    {
+        steps += _ADS.readADC_SingleEnded(3);
+    }
+    vsense = (_ADS.computeVolts(steps / count) * 1000.0);
+    vsense -= 42.6;
+    float current = ((vsense / 28) - CURRENT_SENSE_OFFSET) / _current_shuntResistor;
+    // current -= 1;
+
+    current = current < 0 ? 0.000 : current;
+    // current = current - (vsense / _current_shuntResistor );
+    _current_sensed = current;
+    Serial.print("Sensed current shunt voltage=");
+    Serial.println(vsense);
+
+    return current;
 }
 
 void PSU::calibrate()
@@ -178,47 +217,4 @@ float PSU::MeasureTemp()
     Serial.print(tempC);
     Serial.println(" degC,");
     return tempC;
-}
-
-float PSU::voltage_read()
-{
-    //_ADS.setGain(GAIN_ONE);
-
-    float voltage = 0;
-    long steps = 0;
-    size_t count = 20;
-    for (size_t i = 0; i < count; i++)
-    {
-        steps += _ADS.readADC_SingleEnded(0);
-    }
-    voltage = _ADS.computeVolts(steps / count);
-    // voltage = roundf(voltage * 1000) / 1000.0;
-    float Vout = voltage * ((R1_VOUT_SENSE + R2_VOUT_SENSE) / R2_VOUT_SENSE);
-    _voltage_sensed = roundf(Vout * 1000) / 1000.0;
-    VOUT = _voltage_sensed;
-    return _voltage_sensed ; // since Dc ground is 20 mv above arduino ground , arduino always reads arround 20mv lower that true voltage
-}
-
-float PSU::current_read()
-{
-    long steps = 0;
-    float vsense = 0;
-    size_t count = 20;
-
-    for (size_t i = 0; i < count; i++)
-    {
-        steps += _ADS.readADC_SingleEnded(3);
-    }
-    vsense = (_ADS.computeVolts(steps / count) * 1000.0);
-    // vsense -= 81;
-    float current = ((vsense / 28) - CURRENT_SENSE_OFFSET) / _current_shuntResistor;
-    //current -= 1;
-
-    current = current < 0 ? 0.000 : current;
-    // current = current - (vsense / _current_shuntResistor );
-    _current_sensed = current;
-    Serial.print("Sensed current shunt voltage=");
-    Serial.println(vsense);
-
-    return current;
 }
